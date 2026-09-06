@@ -1,0 +1,35 @@
+name: Build AvaloniaVS VSIX
+
+on:
+  workflow_dispatch: # 手動點擊執行
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # 直接抓取官方倉庫的 ARCHIVE 分支，不需 Fork
+      - name: Checkout Official Repo ARCHIVE Branch
+        uses: actions/checkout@v4
+        with:
+          repository: 'AvaloniaUI/AvaloniaVS'
+          ref: 'ARCHIVE'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet Packages
+        run: nuget restore AvaloniaVS.sln
+
+      - name: Build AvaloniaVS.VS2022
+        run: |
+          msbuild AvaloniaVS.VS2022\AvaloniaVS.VS2022.csproj /p:Configuration=Release /p:DeployExtension=false /p:ZipPackageCompressionLevel=normal
+
+      - name: Upload VSIX Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AvaloniaVS-VS2022-VSIX
+          path: AvaloniaVS.VS2022\bin\Release\*.vsix
