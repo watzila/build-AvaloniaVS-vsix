@@ -3,6 +3,10 @@ name: Build AvaloniaVS VSIX
 on:
   workflow_dispatch:
 
+# 賦予 workflow 建立 Release 的寫入權限
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -32,26 +36,37 @@ jobs:
       - name: Restore NuGet Packages
         run: nuget restore AvaloniaVS.sln
 
-      # 直接針對整個 sln 編譯 VS2022 目標，並關閉強名稱簽名限制
       - name: Build AvaloniaVS.VS2022
         run: |
           msbuild AvaloniaVS.sln /t:AvaloniaVS_VS2022 /p:Configuration=Release /p:DeployExtension=false /p:SignAssembly=false /p:DelaySign=false /p:PublicSign=false /p:FailOnMissingPkgDef=false
 
-      # 搜尋產生的 .vsix 檔案路徑以驗證
-      - name: Verify VSIX
+      # 將檔案搬移至獨立目錄，方便上傳
+      - name: Prepare Assets for Release
         shell: pwsh
         run: |
-          $vsix = Get-ChildItem -Path . -Filter "*.vsix" -Recurse
+          New-Item -ItemType Directory -Force -Path ./release_assets
+          $vsix = Get-ChildItem -Path . -Filter "*.vsix" -Recurse | Select-Object -First 1
           if ($vsix) {
-            Write-Host "成功生成 VSIX 檔案："
-            $vsix | ForEach-Object { Write-Host $_.FullName }
+            Copy-Item $vsix.FullName -Destination ./release_assets/AvaloniaVS.VS2022.vsix
+            Write-Host "已準備發布檔案: $($vsix.FullName)"
           } else {
-            Write-Error "未找到任何 .vsix 檔案！"
+            Write-Error "找不到 .vsix 檔案！"
             exit 1
           }
 
-      - name: Upload VSIX Artifact
-        uses: actions/upload-artifact@v4
+      # 自動建立或覆蓋名為 v-latest 的 GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: AvaloniaVS-VS2022-VSIX
-          path: "**/bin/Release/**/*.vsix"
+          tag_name: latest
+          name: "AvaloniaVS Community Build (MIT ARCHIVE)"
+          body: |
+            這是由 GitHub Actions 自動建置的 Avalonia for Visual Studio 2022 (ARCHIVE 分支 / MIT 協議)。
+            
+            ### 安裝提醒：
+            1. 關閉 Visual Studio 2022。
+            2. 雙擊下載的 `AvaloniaVS.VS2022.vsix` 進行安裝。
+            3. 安裝完成後，請至 VS 的「延伸模組 -> 管理延伸模組」中將其**關閉自動更新**。
+          files: ./release_assets/*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
