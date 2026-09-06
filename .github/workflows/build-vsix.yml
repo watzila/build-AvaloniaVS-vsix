@@ -1,19 +1,27 @@
 name: Build AvaloniaVS VSIX
 
 on:
-  workflow_dispatch: # 手動點擊執行
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      # 直接抓取官方倉庫的 ARCHIVE 分支，不需 Fork
       - name: Checkout Official Repo ARCHIVE Branch
         uses: actions/checkout@v4
         with:
           repository: 'AvaloniaUI/AvaloniaVS'
           ref: 'ARCHIVE'
+          submodules: 'recursive' # 確保關聯子模組都有拉齊
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            6.0.x
+            7.0.x
+            8.0.x
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -24,9 +32,27 @@ jobs:
       - name: Restore NuGet Packages
         run: nuget restore AvaloniaVS.sln
 
+      # 先編譯核心相依項目
+      - name: Build Core Dependencies
+        run: |
+          msbuild AvaloniaVS.Core\AvaloniaVS.Core.csproj /p:Configuration=Release /p:SignAssembly=false
+
+      # 編譯主專案，關閉強簽名驗證與修復 PkgDef 載入限制
       - name: Build AvaloniaVS.VS2022
         run: |
-          msbuild AvaloniaVS.VS2022\AvaloniaVS.VS2022.csproj /p:Configuration=Release /p:DeployExtension=false /p:ZipPackageCompressionLevel=normal
+          msbuild AvaloniaVS.VS2022\AvaloniaVS.VS2022.csproj /p:Configuration=Release /p:DeployExtension=false /p:ZipPackageCompressionLevel=normal /p:SignAssembly=false /p:DelaySign=false /p:FailOnMissingPkgDef=false
+
+      # 驗證步驟：確認產生的 vsix
+      - name: Verify VSIX generated
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path "AvaloniaVS.VS2022\bin\Release\*.vsix"
+          if ($files.Count -eq 0) {
+            Write-Error "找不到生成的 .vsix 檔案！"
+            exit 1
+          } else {
+            Write-Host "成功找到安裝檔: $($files[0].FullName)"
+          }
 
       - name: Upload VSIX Artifact
         uses: actions/upload-artifact@v4
