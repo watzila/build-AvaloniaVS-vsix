@@ -35,26 +35,38 @@ jobs:
       - name: Restore NuGet Packages
         run: nuget restore AvaloniaVS.sln
 
-      # 關鍵步驟：修改 VSIX Manifest 版本號為 999.0.0，防止任何商店更新覆蓋
+      # 1. 產生臨時強名稱金鑰，解決 CreatePkgDef 與 Code View 閃退問題
+      - name: Generate Strong Name Key
+        shell: pwsh
+        run: |
+          $snExe = (Get-ChildItem -Path "C:\Program Files (x86)\Microsoft SDKs\Windows" -Filter "sn.exe" -Recurse | Select-Object -First 1).FullName
+          if (-not $snExe) {
+            Write-Error "找不到 sn.exe 工具！"
+            exit 1
+          }
+          Write-Host "使用工具: $snExe"
+          & $snExe -k temp.snk
+          Write-Host "成功生成 temp.snk"
+
+      # 2. 修改 VSIX Manifest 版本號為 999.0.0，防止任何商店更新覆蓋
       - name: Patch VSIX Manifest Version
         shell: pwsh
         run: |
           $manifestPaths = Get-ChildItem -Path . -Filter "source.extension.vsixmanifest" -Recurse
           foreach ($file in $manifestPaths) {
             $content = [System.IO.File]::ReadAllText($file.FullName)
-            # 將版本號改為極大值，商店版本永遠不可能比它高
             $content = $content -replace '<Identity Id="([^"]+)" Version="([^"]+)"', '<Identity Id="$1" Version="999.0.0"'
-            # 更改顯示名稱，方便在延伸模組列表一眼認出
             $content = $content -replace '<DisplayName>([^<]+)</DisplayName>', '<DisplayName>Avalonia for Visual Studio (Community Free)</DisplayName>'
             [System.IO.File]::WriteAllText($file.FullName, $content)
             Write-Host "已修改版本號於: $($file.FullName)"
           }
 
-      # 編譯主專案（同時保留 PublicSign 修正先前的閃退問題）
+      # 3. 編譯主專案，傳入金鑰檔案
       - name: Build AvaloniaVS.VS2022
         run: |
-          msbuild AvaloniaVS.sln /t:AvaloniaVS_VS2022 /p:Configuration=Release /p:DeployExtension=false /p:PublicSign=true /p:DelaySign=false /p:SignAssembly=false /p:FailOnMissingPkgDef=false
+          msbuild AvaloniaVS.sln /t:AvaloniaVS_VS2022 /p:Configuration=Release /p:DeployExtension=false /p:SignAssembly=true /p:AssemblyOriginatorKeyFile="${{ github.workspace }}\temp.snk" /p:FailOnMissingPkgDef=false
 
+      # 4. 準備發布檔案
       - name: Prepare Assets for Release
         shell: pwsh
         run: |
@@ -68,13 +80,19 @@ jobs:
             exit 1
           }
 
-      - name: Create GitHub Release
+      # 5. 建立 GitHub Release
+      name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: "AvaloniaVS Build"
           body: |
-            這個版本已鎖定版本號為 999.0.0，安裝後 Visual Studio **不會**再自動被商店更新為商業付費版。
+            這是由 GitHub Actions 自動建置的 Avalonia for Visual Studio 2022 (ARCHIVE 分支 / MIT 協議)。
+            
+            ### 安裝提醒：
+            1. 關閉 Visual Studio 2022。
+            2. 雙擊下載的 `AvaloniaVS.VS2022.vsix` 進行安裝。
+            3. 安裝完成後，請至 VS 的「延伸模組 -> 管理延伸模組」中將其**關閉自動更新**。
           files: ./release_assets/*.vsix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
