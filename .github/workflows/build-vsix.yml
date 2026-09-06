@@ -48,17 +48,19 @@ jobs:
           & $snExe -k temp.snk
           Write-Host "成功生成 temp.snk"
 
-      # 2. 修改 VSIX Manifest 版本號為 999.0.0，防止任何商店更新覆蓋
-      - name: Patch VSIX Manifest Version
+      # 修改 VSIX Manifest 的 ID 與 Version，阻斷市集關聯與查詢逾時
+      - name: Patch VSIX Manifest Version & ID
         shell: pwsh
         run: |
           $manifestPaths = Get-ChildItem -Path . -Filter "source.extension.vsixmanifest" -Recurse
           foreach ($file in $manifestPaths) {
             $content = [System.IO.File]::ReadAllText($file.FullName)
-            $content = $content -replace '<Identity Id="([^"]+)" Version="([^"]+)"', '<Identity Id="$1" Version="999.0.0"'
+            # 將 ID 置換為自訂 ID，避免 VSIXInstaller 去 Marketplace 查詢 extension pack
+            $content = $content -replace '<Identity Id="AvaloniaVS"', '<Identity Id="AvaloniaVS.Community"'
+            $content = $content -replace 'Version="([^"]+)"', 'Version="999.0.0"'
             $content = $content -replace '<DisplayName>([^<]+)</DisplayName>', '<DisplayName>Avalonia for Visual Studio (Community Free)</DisplayName>'
             [System.IO.File]::WriteAllText($file.FullName, $content)
-            Write-Host "已修改版本號於: $($file.FullName)"
+            Write-Host "已修改 ID 與版本號於: $($file.FullName)"
           }
 
       # 3. 編譯主專案，傳入金鑰檔案
